@@ -9,15 +9,27 @@
 # so alpine would work, but manylinux is the better-supported path and 200MB of
 # image is irrelevant on a 16GB disk.
 
-FROM golang:1.25-alpine AS build
+# golang:1.26, NOT 1.25. Checked against each module's go.mod via the Go module
+# proxy rather than guessed:
+#   httpx     v1.10.0  requires  go 1.26    <- 1.25 fails here, and did
+#   katana    v1.6.1   requires  go 1.25.7
+#   nuclei    v3.11.0  requires  go 1.25.7
+#   subfinder v2.14.0  requires  go 1.24.0
+# Pinning the tool versions is not enough: the TOOLCHAIN version is a pin too,
+# and it is the one the first build died on.
+FROM golang:1.26-alpine AS build
 RUN apk add --no-cache git
 
 # CGO off so the binaries are static and run on the debian runtime below.
 ENV CGO_ENABLED=0
-RUN go install github.com/projectdiscovery/katana/cmd/katana@v1.6.1 \
- && go install github.com/projectdiscovery/httpx/cmd/httpx@v1.10.0 \
- && go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.11.0 \
- && go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@v2.14.0
+
+# One RUN per tool, cheapest first. A single chained RUN reports one opaque
+# "exit code 1" for all four and discards the layer on any failure, which is
+# exactly how the first build wasted everyone's time.
+RUN go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@v2.14.0
+RUN go install github.com/projectdiscovery/katana/cmd/katana@v1.6.1
+RUN go install github.com/projectdiscovery/httpx/cmd/httpx@v1.10.0
+RUN go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.11.0
 
 FROM python:3.13-slim
 

@@ -17,6 +17,23 @@ Deployed to the Docker LXC via a **Portainer Git-backed stack**. Full context li
 
 **Every version is pinned and was checked against the project's releases, not recalled.** The first draft of the Dockerfile was written from memory and all six were wrong, by as much as eight minor versions. A client report that says "nuclei 3.11.0 found this" has to still mean that in six months.
 
+## The build toolchain is a pin too
+
+Build stage is **`golang:1.26-alpine`**, and the version matters:
+
+| Module | Requires |
+| --- | --- |
+| `httpx` v1.10.0 | **go 1.26** |
+| `katana` v1.6.1 | go 1.25.7 |
+| `nuclei` v3.11.0 | go 1.25.7 |
+| `subfinder` v2.14.0 | go 1.24.0 |
+
+**The first build used `golang:1.25-alpine` and failed.** Only `httpx` needs 1.26, and it was chained with the other three, so Docker reported a single opaque `exit code 1` for all four.
+
+**Checked against each module's `go.mod` via the Go module proxy**, which is authoritative. GitHub release tags tell you the version; only `go.mod` tells you what it needs to compile. **Pinning the tools and not the toolchain is half a pin.**
+
+Each tool now gets **its own `RUN`**, so a failure names the tool that broke and the passing layers cache.
+
 ## Deploy
 
 Portainer → **Stacks** → **Add stack** → **Repository** → this repo's URL → **Deploy**.
