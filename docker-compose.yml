@@ -1,36 +1,67 @@
-# Deploy via Portainer: Stacks -> Add stack -> Repository.
-# Point it at this repo. Portainer builds the image and keeps it in step with
-# the pinned versions in the Dockerfile, which is exactly the "toolchain defined
-# in a GitHub repo" decision recorded in the vault.
+# Official pre-built ProjectDiscovery images. NOTHING IS BUILT HERE.
+#
+# Why the custom Dockerfile was deleted (15 July 2026):
+#
+#   1. It failed three deploys in a row. We were compiling someone else's Go
+#      tools from source to arrive at binaries they already publish, tested,
+#      for free.
+#   2. It had no browser. katana needs Chrome for -headless, and this client's
+#      site is JS-rendered: a curl of their blog post reported "no links to
+#      commercial pages" while the rendered DOM had four links to
+#      /book-appointment. A crawler that cannot render JS would put that error
+#      in a client report. The official katana image ships chromium.
+#   3. Provenance. projectdiscovery/* is the vendor's own namespace.
+#
+# Versions stay pinned. Never use :latest: a report saying "nuclei v3.11.0
+# found this" has to still mean that in six months.
+#
+# Deploy: Portainer -> Stacks -> Add stack -> Repository -> this repo.
+# n8n then runs:  docker exec simpli-katana katana -u https://example.com ...
 
 services:
-  scanner:
-    build: .
-    image: simplidigital/scanner:1.0.0
-    container_name: simpli-scanner
+  katana:
+    image: projectdiscovery/katana:v1.6.1
+    container_name: simpli-katana
+    # Ships chromium, so -headless works. This is the whole reason we stopped
+    # building our own image.
+    entrypoint: ["sleep", "infinity"]
     restart: unless-stopped
-    init: true
+    security_opt: [no-new-privileges:true]
+    mem_limit: 2g
+    cpus: 1.0
 
-    # A long-lived toolbox, not a service. n8n runs `docker exec` against it.
-    #
-    # This is the whole reason to use a stack rather than `docker run --rm`:
-    # nuclei's template set is large and slow to fetch. On a named volume it is
-    # downloaded once and survives restarts and rebuilds. A --rm container would
-    # either re-download every scan or bake stale templates into the image.
-    command: ["sleep", "infinity"]
+  httpx:
+    image: projectdiscovery/httpx:v1.10.0
+    container_name: simpli-httpx
+    entrypoint: ["sleep", "infinity"]
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
+    cpus: 1.0
 
+  subfinder:
+    image: projectdiscovery/subfinder:v2.14.0
+    container_name: simpli-subfinder
+    entrypoint: ["sleep", "infinity"]
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
+    cpus: 0.5
+
+  nuclei:
+    image: projectdiscovery/nuclei:v3.11.0
+    container_name: simpli-nuclei
+    entrypoint: ["sleep", "infinity"]
+    restart: unless-stopped
+    # The template set is large and slow to fetch. On a named volume it is
+    # downloaded once and survives restarts. This is why nuclei is a
+    # long-lived container rather than docker run --rm.
     volumes:
-      - nuclei-templates:/opt/nuclei-templates
-
-    environment:
-      - NUCLEI_TEMPLATES_DIR=/opt/nuclei-templates
-
-    # Nothing here needs privilege. Every tool makes ordinary outbound requests.
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-
+      - nuclei-templates:/root/nuclei-templates
+      # Scope guardrails travel with the container, never as a typed flag.
+      # See nuclei-config.yaml and CLAUDE.md Section 6.
+      - ./nuclei-config.yaml:/root/.config/nuclei/config.yaml:ro
+    security_opt: [no-new-privileges:true]
     # Third-party template code runs here on a schedule. Cap it so a runaway
     # scan cannot take the Docker host down with it.
     mem_limit: 3g

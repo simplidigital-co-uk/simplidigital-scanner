@@ -1,63 +1,58 @@
 # simplidigital-scanner
 
-The crawling and security toolchain, as a pinned container image.
+The crawling and security toolchain. **Official pre-built images, pinned. Nothing is compiled here.**
 
-Deployed to the Docker LXC via a **Portainer Git-backed stack**. Full context lives in the vault: `SimpliDigital/_sop/Scanner LXC Setup.md`.
+Deployed to the Docker LXC as a Portainer Git-backed stack. Full context: `SimpliDigital/_sop/Scanner LXC Setup.md` in the vault.
 
 ## What is in it
 
-| Tool | Version | Job |
+| Container | Image | Job |
 | --- | --- | --- |
-| katana | v1.6.1 | Crawl |
-| httpx | v1.10.0 | Status, titles, tech detection |
-| nuclei | v3.11.0 | Misconfiguration checks, non-intrusive only |
-| subfinder | v2.14.0 | Passive subdomain discovery |
-| sslyze | 6.3.1 | TLS |
-| checkdmarc | 5.17.3 | SPF, DKIM, DMARC, DNSSEC |
+| `simpli-katana` | `projectdiscovery/katana:v1.6.1` | Crawl. **Ships chromium, so `-headless` renders JS** |
+| `simpli-httpx` | `projectdiscovery/httpx:v1.10.0` | Status, titles, tech detection |
+| `simpli-nuclei` | `projectdiscovery/nuclei:v3.11.0` | Misconfiguration checks, non-intrusive only |
+| `simpli-subfinder` | `projectdiscovery/subfinder:v2.14.0` | Passive subdomain discovery |
 
-**Every version is pinned and was checked against the project's releases, not recalled.** The first draft of the Dockerfile was written from memory and all six were wrong, by as much as eight minor versions. A client report that says "nuclei 3.11.0 found this" has to still mean that in six months.
+## Why the custom Dockerfile was deleted
 
-## The build toolchain is a pin too
+**It failed three deploys and it was the wrong idea.**
 
-Build stage is **`golang:1.26-alpine`**, and the version matters:
+1. **We were compiling ProjectDiscovery's Go tools from source** to arrive at binaries they already publish, pre-built and tested, in their own Docker namespace. The build was pure liability.
+2. **It had no browser.** katana needs Chrome for `-headless`, and **this client's site is JS-rendered**: a `curl` of their blog post reported *"no links to commercial pages"*, while the rendered DOM had **four links to `/book-appointment`**. **A crawler that cannot render JS would have put that error into a client report.** The official katana image ships chromium.
+3. **The build broke on a version we never checked.** `httpx v1.10.0` declares `go 1.26`; our image was `golang:1.25-alpine`. Pinning the tools without pinning the toolchain is half a pin. (ProjectDiscovery's own Dockerfile builds on `golang:1.26.4-alpine`, which is how we confirmed it.)
 
-| Module | Requires |
-| --- | --- |
-| `httpx` v1.10.0 | **go 1.26** |
-| `katana` v1.6.1 | go 1.25.7 |
-| `nuclei` v3.11.0 | go 1.25.7 |
-| `subfinder` v2.14.0 | go 1.24.0 |
-
-**The first build used `golang:1.25-alpine` and failed.** Only `httpx` needs 1.26, and it was chained with the other three, so Docker reported a single opaque `exit code 1` for all four.
-
-**Checked against each module's `go.mod` via the Go module proxy**, which is authoritative. GitHub release tags tell you the version; only `go.mod` tells you what it needs to compile. **Pinning the tools and not the toolchain is half a pin.**
-
-Each tool now gets **its own `RUN`**, so a failure names the tool that broke and the passing layers cache.
+**Versions stay pinned. Never `:latest`.** A report saying *"nuclei v3.11.0 found this"* has to still mean that in six months.
 
 ## Deploy
 
-Portainer → **Stacks** → **Add stack** → **Repository** → this repo's URL → **Deploy**.
+Portainer -> **Stacks** -> **Add stack** -> **Repository** -> this repo -> **Deploy**.
 
-Portainer builds the image and starts one long-lived container. Update by bumping a version in the `Dockerfile`, pushing, and hitting **Pull and redeploy**.
+**If a deploy fails with an error quoting code that is not on `main`, Portainer is building a cached clone.** Delete the stack and re-add it; that forces a fresh fetch. **An error message quoting code that no longer exists means you are debugging the wrong version.**
 
-## Why a long-lived container
+Update path: bump a tag, push, **Pull and redeploy**.
 
-The tools are one-shot CLI commands, so a container that sleeps looks odd. It is deliberate.
+## Usage
 
-**nuclei's template set is large and slow to fetch.** On the named volume it is downloaded once and survives restarts and rebuilds. A `docker run --rm` per scan would either re-download the set every time or bake stale templates into the image.
-
-n8n runs commands against it:
+n8n execs against the long-lived containers:
 
 ```bash
-docker exec simpli-scanner katana -u https://example.com -jc -silent
+docker exec simpli-katana katana -u https://example.com -headless -jc -silent
+docker exec simpli-httpx  httpx -u https://example.com -title -status-code -tech-detect -json
+docker exec simpli-nuclei nuclei -u https://example.com -j
 ```
+
+**Use `-headless` on any JS-rendered site**, which is most client sites. Server HTML is not the asset.
 
 ## Scope rules
 
-**`nuclei-config.yaml` is baked into the image.** It excludes `intrusive`, `dast`, `fuzz`, `brute-force`, `sqli`, `rce`, `xss`, `ssrf`, `lfi` and `injection`, rate-limits to 20 requests a second, and sets an identifying User-Agent.
+**`nuclei-config.yaml` is mounted into the container**, not passed as a flag. It excludes `intrusive`, `dast`, `fuzz`, `brute-force`, `sqli`, `rce`, `xss`, `ssrf`, `lfi` and `injection`, rate-limits to 20 requests a second, and sets an identifying User-Agent.
 
-**These are in the file, not on the command line, on purpose.** A flag is typed by whoever runs the command, and one day it will not be. In the image, the constraint travels with the tool.
+**A flag is typed by whoever runs the command, and one day it will not be.** In the container, the constraint travels with the tool.
 
 **The rule no config can enforce: never brute-force paths.** Guessing at `/.git/config`, `/.env` or `/backup.sql` is unauthorised-access-shaped conduct however passive it feels. Discovery is limited to `security.txt`, `robots.txt`, certificate transparency logs, and paths the site itself links to.
 
 **No scan touches any client asset before a signed scope letter is filed.** Under the Computer Misuse Act 1990, "authorisation" is undefined and motive is not a defence.
+
+## Not here yet
+
+`sslyze` and `checkdmarc` (TLS, SPF/DKIM/DMARC/DNSSEC) have no official image and need a small Python container. **Added when a workflow needs them, not before.** Security audits are gated and not on the critical path.
