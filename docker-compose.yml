@@ -1,0 +1,40 @@
+# Deploy via Portainer: Stacks -> Add stack -> Repository.
+# Point it at this repo. Portainer builds the image and keeps it in step with
+# the pinned versions in the Dockerfile, which is exactly the "toolchain defined
+# in a GitHub repo" decision recorded in the vault.
+
+services:
+  scanner:
+    build: .
+    image: simplidigital/scanner:1.0.0
+    container_name: simpli-scanner
+    restart: unless-stopped
+    init: true
+
+    # A long-lived toolbox, not a service. n8n runs `docker exec` against it.
+    #
+    # This is the whole reason to use a stack rather than `docker run --rm`:
+    # nuclei's template set is large and slow to fetch. On a named volume it is
+    # downloaded once and survives restarts and rebuilds. A --rm container would
+    # either re-download every scan or bake stale templates into the image.
+    command: ["sleep", "infinity"]
+
+    volumes:
+      - nuclei-templates:/opt/nuclei-templates
+
+    environment:
+      - NUCLEI_TEMPLATES_DIR=/opt/nuclei-templates
+
+    # Nothing here needs privilege. Every tool makes ordinary outbound requests.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    # Third-party template code runs here on a schedule. Cap it so a runaway
+    # scan cannot take the Docker host down with it.
+    mem_limit: 3g
+    cpus: 1.5
+
+volumes:
+  nuclei-templates:

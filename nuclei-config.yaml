@@ -1,0 +1,32 @@
+# SimpliDigital nuclei configuration.
+#
+# These exclusions are baked into the IMAGE, not passed as a command-line flag.
+# A flag is typed by whoever runs the command, and one day it will not be. The
+# config file is part of the container, so the constraint travels with the tool
+# and cannot be forgotten under time pressure.
+#
+# This encodes CLAUDE.md Section 6. Under the Computer Misuse Act 1990,
+# "authorisation" is undefined and motive is not a defence. Non-intrusive is a
+# legal boundary here, not a preference.
+
+exclude-tags:
+  - intrusive
+  - dast
+  - fuzz
+  - brute-force
+  - sqli
+  - rce
+  - xss
+  - ssrf
+  - lfi
+  - injection
+
+# Be a polite guest on someone else's server.
+rate-limit: 20
+concurrency: 10
+timeout: 10
+retries: 1
+
+# Identify ourselves. An audit that hides who is scanning is not an audit.
+header:
+  - "User-Agent: SimpliDigital-Audit/1.0 (+https://simplidigital.co.uk; authorised scan)"
